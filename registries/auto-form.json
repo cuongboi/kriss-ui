@@ -1,0 +1,29 @@
+{
+	"$schema": "https://ui.shadcn.com/schema/registry-item.json",
+	"name": "auto-form",
+	"type": "registry:ui",
+	"title": "Auto Form",
+	"description": "A form component that automatically generates fields based on a Zod schema.",
+	"dependencies": [
+		"deepmerge",
+		"zod@^4",
+		"@hookform/resolvers",
+		"react-hook-form"
+	],
+	"devDependencies": [],
+	"registryDependencies": [
+		"field",
+		"input",
+		"button",
+		"label",
+		"checkbox",
+		"select"
+	],
+	"files": [
+		{
+			"path": "registry/default/ui/auto-form.tsx",
+			"content": "app/components/ui/auto-form.tsx",
+			"type": "registry:ui"
+		}
+	]
+}

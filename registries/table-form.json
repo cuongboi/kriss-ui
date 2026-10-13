@@ -1,0 +1,26 @@
+{
+	"$schema": "https://ui.shadcn.com/schema/registry-item.json",
+	"name": "table-form",
+	"type": "registry:ui",
+	"title": "Data Table",
+	"description": "A typed data table with sorting, pagination, row selection, column visibility and persisted column resizing.",
+	"dependencies": ["@tanstack/react-table@^9", "zustand", "lucide-react"],
+	"devDependencies": [],
+	"registryDependencies": [
+		"table",
+		"button",
+		"checkbox",
+		"dropdown-menu",
+		"empty",
+		"input-group",
+		"select",
+		"skeleton"
+	],
+	"files": [
+		{
+			"path": "registry/default/components/data-table.tsx",
+			"content": "app/components/data-table.tsx",
+			"type": "registry:component"
+		}
+	]
+}

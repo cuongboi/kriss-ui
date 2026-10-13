@@ -1,0 +1,802 @@
+---
+title: Auto Form
+description: Automatically generate fully validated form fields from a Zod schema using react-hook-form.
+---
+
+## Overview
+
+`AutoForm` generates form fields automatically from a plain object whose values are `FieldProps` — each one wrapping a Zod schema alongside optional display metadata like `label`, `placeholder`, `description`, and custom renderers.
+
+It is built on top of [react-hook-form](https://react-hook-form.com) and [Zod v4](https://zod.dev), so you get full type safety, schema-driven validation, and zero boilerplate.
+
+## Installation
+
+```npm
+npm install zod@^4 react-hook-form @hookform/resolvers deepmerge
+```
+
+Then add the component via the registry:
+
+```bash
+npx shadcn add {{url}}/r/auto-form.json
+```
+
+<Callout type="info" title="Dependencies">
+  `AutoForm` also requires the `field`, `input`, `button`, `label`, `checkbox`, and `select` shadcn/ui primitives to be present in your project.
+</Callout>
+
+---
+
+## Basic Usage
+
+The minimal form: define a schema object and handle `onSubmit`.
+
+```tsx example="true"
+"use client";
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  firstName: {
+    schema: z.string().min(2, "At least 2 characters"),
+    placeholder: "John",
+    description: "Enter your first name.",
+  },
+  email: {
+    schema: z.string().email(),
+    placeholder: "john@example.com",
+  },
+  age: {
+    schema: z.number().min(18, "Must be 18 or older"),
+    placeholder: "18",
+    label: "Cam age"
+  },
+}
+
+export default function BasicAutoForm() {
+  return (
+    <AutoForm
+      schema={schema}
+      className="space-y-6"
+      onSubmit={(data) => {
+        console.log("Submitted:", data)
+      }}
+    >
+      <Button type="submit">Submit</Button>
+    </AutoForm>
+  )
+}
+```
+
+---
+
+## Supported Field Types
+
+`AutoForm` maps Zod schema types to the appropriate UI component automatically.
+
+| Zod Type | Rendered As | Notes |
+|---|---|---|
+| `z.string()` | `<Input type="text">` | Default for all string-like values |
+| `z.number()` | `<Input type="number">` | Auto-converts empty string to `""` |
+| `z.boolean()` | `<Checkbox>` + `<Label>` | `placeholder` becomes the label text |
+| `z.enum([...])` | `<Select>` | Options derived from enum values |
+| `z.date()` | `<Input type="date">` | String ↔ Date conversion may be needed |
+| `z.file()` | `<Input type="file">` | Native file picker |
+
+---
+
+## Examples
+
+### Boolean / Checkbox
+
+Use `z.boolean()` for checkbox fields. The `placeholder` prop becomes the label shown next to the checkbox.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  acceptTerms: {
+    schema: z.boolean(),
+    placeholder: "I agree to the Terms of Service",
+  },
+  receiveUpdates: {
+    schema: z.boolean().default(true),
+    placeholder: "Send me product updates",
+  },
+}
+
+export function BooleanFieldExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      className="space-y-4"
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Continue</Button>
+    </AutoForm>
+  )
+}
+```
+
+### Enum / Select
+
+`z.enum()` values are automatically rendered as a `<Select>`. Labels are prettified from the enum value (e.g. `"admin_user"` → `"Admin User"`).
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  role: {
+    schema: z.enum(["admin", "editor", "viewer"]),
+    label: "Team Role",
+    placeholder: "Select a role...",
+    description: "This controls what the user can access.",
+  },
+}
+
+export function EnumSelectExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Save Role</Button>
+    </AutoForm>
+  )
+}
+```
+
+### Default Values
+
+You can supply default values via `defaultValues` on `AutoForm`, or via `z.default()` on the schema itself — both are merged automatically.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  username: {
+    // default embedded directly in the Zod schema
+    schema: z.string().min(3).default("cuong"),
+  },
+  role: {
+    schema: z.enum(["admin", "editor", "viewer"]).default("editor"),
+  },
+  notifications: {
+    schema: z.boolean(),
+    placeholder: "Enable notifications",
+  },
+}
+
+export function DefaultValuesExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      // prop-level defaults override schema-level defaults
+      defaultValues={{ notifications: true }}
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Update Settings</Button>
+    </AutoForm>
+  )
+}
+```
+
+### Custom Labels & Descriptions
+
+Override the auto-generated label and add helper text with `label` and `description`.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  githubUrl: {
+    label: "GitHub Profile",
+    description: "Paste your public GitHub profile URL.",
+    schema: z.string().url("Must be a valid URL"),
+    placeholder: "https://github.com/username",
+  },
+  bio: {
+    label: "Short Bio",
+    description: "Shown on your public profile. Max 160 characters.",
+    schema: z.string().max(160).optional(),
+    placeholder: "I build things for the web…",
+  },
+}
+
+export function LabelsExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      className="space-y-6"
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Save Profile</Button>
+    </AutoForm>
+  )
+}
+```
+
+<Callout type="info">
+  If no `label` is provided, AutoForm prettifies the field key. For example, `githubUrl` becomes `"Github Url"` and `first_name` becomes `"First Name"`.
+</Callout>
+
+### Disabled Fields
+
+Set `disabled: true` on a field to make it read-only.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  email: {
+    schema: z.string().email(),
+    disabled: true,
+    defaultValue: "readonly@example.com",
+    description: "Your email cannot be changed here.",
+  },
+  displayName: {
+    schema: z.string().min(2),
+    placeholder: "Display name",
+  },
+}
+
+export function DisabledFieldExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      className="space-y-4"
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Update Profile</Button>
+    </AutoForm>
+  )
+}
+```
+
+### Custom Field Renderer (`render`)
+
+Use `render` to replace the default input with any custom component. The render function receives `{ field, form, options, ... }`.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { Slider } from "@/components/ui/slider"
+
+const schema = {
+  bio: {
+    label: "Bio",
+    schema: z.string().min(10, "At least 10 characters"),
+    render: ({ field }) => (
+      <Textarea {...field} rows={4} placeholder="Tell us about yourself…" />
+    ),
+  },
+  experience: {
+    label: "Years of Experience",
+    description: "Drag to select.",
+    schema: z.number().min(0).max(30),
+    render: ({ field }) => (
+      <Slider
+        min={0}
+        max={30}
+        step={1}
+        value={[field.value ?? 0]}
+        onValueChange={([v]) => field.onChange(v)}
+      />
+    ),
+  },
+}
+
+export function CustomRendererExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      className="space-y-6"
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Save</Button>
+    </AutoForm>
+  )
+}
+```
+
+### Drop-in Component (`as`)
+
+Use `as` to swap the input component without writing a full render function. The component receives all react-hook-form field props (`value`, `onChange`, `onBlur`, `name`, `ref`) as well as `id`, `disabled`, and `placeholder`.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+
+const schema = {
+  notes: {
+    label: "Notes",
+    schema: z.string().optional(),
+    as: Textarea,
+    placeholder: "Add any additional notes…",
+  },
+}
+
+export function AsComponentExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Submit</Button>
+    </AutoForm>
+  )
+}
+```
+
+<Callout type="warn" title="render vs as">
+  `render` and `as` are mutually exclusive — you cannot use both on the same field. Use `render` when you need access to `form` or `options`; use `as` for simple component swaps.
+</Callout>
+
+### Custom CSS Class Names
+
+Use `classNames` to apply Tailwind or custom classes to individual parts of a field.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  couponCode: {
+    label: "Coupon Code",
+    schema: z.string().toUpperCase().optional(),
+    placeholder: "SAVE20",
+    classNames: {
+      container: "rounded-lg border border-dashed p-4",
+      label: "text-xs font-semibold uppercase tracking-widest text-muted-foreground",
+      input: "font-mono uppercase",
+      description: "text-xs italic",
+    },
+    description: "Enter a valid coupon to get a discount.",
+  },
+}
+
+export function ClassNamesExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Apply</Button>
+    </AutoForm>
+  )
+}
+```
+
+---
+
+## Dynamic Panels
+
+Use `panels` to inject arbitrary React content **before** or **after** a specific field. Each panel declares which fields it `watch`es, and re-renders when those values change.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  hasCompany: {
+    schema: z.boolean(),
+    placeholder: "I represent a company",
+  },
+  companyName: {
+    label: "Company Name",
+    schema: z.string().optional(),
+    placeholder: "Acme Inc.",
+  },
+  vatNumber: {
+    label: "VAT Number",
+    schema: z.string().optional(),
+    placeholder: "EU123456789",
+  },
+}
+
+export function PanelExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      className="space-y-4"
+      panels={[
+        {
+          // Renders between hasCompany and companyName
+          after: "hasCompany",
+          watch: ["hasCompany"],
+          render: ({ form }) => {
+            const hasCompany = form.watch("hasCompany")
+            if (!hasCompany) return null
+            return (
+              <p className="rounded-md bg-muted px-4 py-2 text-sm text-muted-foreground">
+                Please fill in your company details below.
+              </p>
+            )
+          },
+        },
+      ]}
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Continue</Button>
+    </AutoForm>
+  )
+}
+```
+
+<Callout type="info" title="Panel placement">
+  Use `before: "fieldKey"` to render the panel **above** the field, or `after: "fieldKey"` to render it **below**. They are mutually exclusive per panel entry.
+</Callout>
+
+---
+
+## Accessing the Form Instance
+
+`onSubmit` receives both the validated `data` and the underlying `UseFormReturn` instance, so you can reset, set errors, or trigger other side effects.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  email: { schema: z.string().email() },
+  password: { schema: z.string().min(8), placeholder: "••••••••" },
+}
+
+export function FormInstanceExample() {
+  return (
+    <AutoForm
+      schema={schema}
+      className="space-y-4"
+      onSubmit={async (data, form) => {
+        try {
+          await login(data)
+          form.reset()
+        } catch {
+          form.setError("email", {
+            message: "Invalid email or password",
+          })
+        }
+      }}
+    >
+      <Button type="submit">Sign In</Button>
+    </AutoForm>
+  )
+}
+```
+
+---
+
+## Controlling the Form from Outside (`formRef`)
+
+Pass a `formRef` to get the underlying react-hook-form [`UseFormReturn`](https://react-hook-form.com/docs/useform) instance outside of `onSubmit`. Use it when the controls live outside the form, for example in a dialog footer, a toolbar, or a parent wizard step. It lets you submit, validate, reset, read values, or set values from anywhere.
+
+```tsx example="true"
+"use client"
+
+import { useRef } from "react"
+import { z } from "zod"
+import type { UseFormReturn } from "react-hook-form"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  email: {
+    schema: z.string().email("Enter a valid email"),
+    placeholder: "jane@example.com",
+  },
+  password: {
+    schema: z.string().min(8, "At least 8 characters"),
+    placeholder: "••••••••",
+  },
+}
+
+type Values = { email: string; password: string }
+
+export function FormRefExample() {
+  const formRef = useRef<UseFormReturn<Values>>(null)
+
+  const handleSave = async (data: Values) => {
+    console.log("Saved:", data)
+  }
+
+  return (
+    <div className="space-y-4">
+      <AutoForm
+        schema={schema}
+        formRef={formRef}
+        className="space-y-4"
+        onSubmit={handleSave}
+      />
+
+      <div className="flex flex-wrap gap-2">
+        {/* Submit: validates, then calls the handler with parsed data */}
+        <Button onClick={() => formRef.current?.handleSubmit(handleSave)()}>
+          Submit
+        </Button>
+
+        {/* Validate: runs Zod validation and shows errors, without submitting */}
+        <Button
+          variant="outline"
+          onClick={async () => {
+            const isValid = await formRef.current?.trigger()
+            console.log("Valid:", isValid)
+          }}
+        >
+          Validate
+        </Button>
+
+        {/* Validate a single field */}
+        <Button
+          variant="outline"
+          onClick={() => formRef.current?.trigger("email")}
+        >
+          Validate Email
+        </Button>
+
+        {/* Read current values (unvalidated) */}
+        <Button
+          variant="outline"
+          onClick={() => console.log(formRef.current?.getValues())}
+        >
+          Get Values
+        </Button>
+
+        {/* Set a value programmatically */}
+        <Button
+          variant="outline"
+          onClick={() =>
+            formRef.current?.setValue("email", "demo@example.com", {
+              shouldValidate: true,
+              shouldDirty: true,
+            })
+          }
+        >
+          Fill Demo Email
+        </Button>
+
+        {/* Reset to default values (or pass new ones) */}
+        <Button variant="ghost" onClick={() => formRef.current?.reset()}>
+          Reset
+        </Button>
+      </div>
+    </div>
+  )
+}
+```
+
+### Common `formRef` operations
+
+| Goal | Call | Notes |
+|---|---|---|
+| Submit | `formRef.current?.handleSubmit(fn)()` | Validates first, then calls `fn(data)` only if valid. |
+| Validate all | `await formRef.current?.trigger()` | Returns `true`/`false` and renders field errors. |
+| Validate some | `await formRef.current?.trigger(["email", "password"])` | Accepts one key or an array of keys. |
+| Get all values | `formRef.current?.getValues()` | Current raw values. Not validated or parsed. |
+| Get one value | `formRef.current?.getValues("email")` | |
+| Set a value | `formRef.current?.setValue("email", v, { shouldValidate: true })` | |
+| Reset | `formRef.current?.reset()` | Restores the merged default values. |
+| Reset with new values | `formRef.current?.reset({ email: "a@b.com" })` | Also makes these the new defaults. |
+| Set an error | `formRef.current?.setError("email", { message: "Taken" })` | e.g. server-side errors. |
+| Clear errors | `formRef.current?.clearErrors()` | |
+| Read state | `formRef.current?.formState.isDirty` | Not reactive. See the callout below. |
+
+<Callout type="info" title="Submitting through onSubmit">
+  `handleSubmit(fn)` runs the `fn` you pass, **not** the `onSubmit` prop. To submit from outside and still go through `onSubmit`, attach a regular `ref` to the `<form>` element and call `requestSubmit()`:
+
+  ```tsx
+  const formElRef = useRef<HTMLFormElement>(null)
+
+  <AutoForm ref={formElRef} schema={schema} onSubmit={handleSave} />
+  <Button onClick={() => formElRef.current?.requestSubmit()}>Save</Button>
+  ```
+</Callout>
+
+<Callout type="warn" title="formRef is not reactive">
+  `formRef.current` is set after the first render and is `null` until then. Changes to values or `formState` through the ref **do not re-render** the parent. To show live state outside the form (for example, disabling a Save button until the form is dirty), use a `panel` or `render` inside the form, or keep the derived state in the parent yourself.
+</Callout>
+
+---
+
+## Validation Mode
+
+Pass `mode` to control when validation fires. Mirrors react-hook-form's [`mode` option](https://react-hook-form.com/docs/useform#mode).
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  username: {
+    schema: z.string().min(3).max(20).regex(/^[a-z0-9_]+$/, "Lowercase, numbers and underscores only"),
+    placeholder: "my_username",
+  },
+}
+
+export function ValidationModeExample() {
+  return (
+    // Validates on every change
+    <AutoForm
+      schema={schema}
+      mode="onChange"
+      onSubmit={(data) => console.log(data)}
+    >
+      <Button type="submit">Check</Button>
+    </AutoForm>
+  )
+}
+```
+
+---
+
+## Full Registration Form
+
+A realistic example combining multiple field types, descriptions, and dynamic panels.
+
+```tsx example="true"
+"use client"
+
+import { z } from "zod"
+import { AutoForm } from "@/components/ui/auto-form"
+import { Button } from "@/components/ui/button"
+
+const schema = {
+  fullName: {
+    schema: z.string().min(2, "Name must be at least 2 characters"),
+    placeholder: "Jane Doe",
+  },
+  email: {
+    schema: z.string().email("Enter a valid email"),
+    placeholder: "jane@example.com",
+  },
+  role: {
+    schema: z.enum(["developer", "designer", "manager", "other"]),
+    label: "Your Role",
+    placeholder: "Select your role…",
+  },
+  experience: {
+    schema: z.number().min(0).max(50),
+    label: "Years of Experience",
+    placeholder: "3",
+  },
+  isFreelancer: {
+    schema: z.boolean(),
+    placeholder: "I'm a freelancer",
+  },
+  website: {
+    schema: z.string().url("Must be a valid URL").optional(),
+    label: "Personal Website",
+    placeholder: "https://janedoe.dev",
+  },
+  newsletter: {
+    schema: z.boolean().default(true),
+    placeholder: "Subscribe to our newsletter",
+  },
+}
+
+export function RegistrationForm() {
+  return (
+    <AutoForm
+      schema={schema}
+      className="space-y-5 w-full"
+      mode="onBlur"
+      panels={[
+        {
+          after: "isFreelancer",
+          watch: ["isFreelancer"],
+          render: ({ form }) =>
+            form.watch("isFreelancer") ? (
+              <p className="rounded-md bg-blue-50 px-4 py-2 text-sm text-blue-700 dark:bg-blue-950 dark:text-blue-300">
+                Don't forget to add your portfolio website below!
+              </p>
+            ) : null,
+        },
+      ]}
+      onSubmit={async (data, form) => {
+        console.log("Registered:", data)
+        form.reset()
+      }}
+    >
+      <div className="flex justify-end pt-2">
+        <Button type="submit">Create Account</Button>
+      </div>
+    </AutoForm>
+  )
+}
+```
+
+---
+
+## API Reference
+
+### `AutoForm` Props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `schema` | `Record<string, FieldProps>` | — | **Required.** Map of field keys to their config. |
+| `onSubmit` | `(data, form) => void \| Promise<void>` | — | **Required.** Called with validated data on submit. |
+| `defaultValues` | `Partial<{ [K]: z.infer<Schema[K]> }>` | `{}` | Pre-fill values at the form level (merged with schema defaults). |
+| `mode` | `"onBlur" \| "onChange" \| "onSubmit" \| ...` | `"onSubmit"` | react-hook-form validation mode. |
+| `panels` | `FormPanels[]` | `undefined` | Inject UI before/after specific fields. |
+| `className` | `ClassValue` | `undefined` | Class applied to the `<form>` element. |
+| `children` | `ReactNode` | `undefined` | Rendered after all fields (e.g. submit button). |
+| `disabled` | `boolean` | `false` | Disable all fields in the form. |
+| `formRef` | `Ref<UseFormReturn<Values>>` | `undefined` | Receives the react-hook-form instance for outside control (submit, validate, reset, getValues…). |
+| `ref` | `Ref<HTMLFormElement>` | `undefined` | Forwarded to the native `<form>` element (e.g. `requestSubmit()`). |
+
+### `FieldProps` Options
+
+| Option | Type | Description |
+|---|---|---|
+| `schema` | `ZodType` | **Required.** The Zod schema for this field. |
+| `label` | `string` | Custom label. Defaults to prettified key name. |
+| `placeholder` | `string` | Placeholder text (also used as checkbox label). |
+| `description` | `string` | Helper text rendered below the input. |
+| `disabled` | `boolean` | Disable this individual field. |
+| `defaultValue` | `z.infer<Schema>` | Field-level default (also readable from `z.default()`). |
+| `render` | `FieldRenderer` | Fully custom render function for the input. |
+| `as` | `ComponentType` | Drop-in component replacement (mutually exclusive with `render`). |
+| `classNames` | `{ container?, input?, label?, description? }` | Per-element class overrides. |
+| `watch` | `string[]` | Field keys this field should re-render when changed. |
+| `meta` | `Record<string, unknown>` | Extra metadata forwarded to custom renderers. |
+
+### `FormPanels` Options
+
+| Option | Type | Description |
+|---|---|---|
+| `before` | `keyof Schema` | Render panel **before** this field key. |
+| `after` | `keyof Schema` | Render panel **after** this field key. |
+| `watch` | `string[]` | Field keys whose changes trigger panel re-renders. |
+| `render` | `({ form }) => ReactNode` | Panel content renderer. |
+
+---
+
+## Tips & Best Practices
+
+- **Use `z.default()`** to set schema-level defaults — they are automatically extracted and passed to react-hook-form.
+- **Prefer `render` over `as`** when you need access to `form` (e.g. for conditional logic or watching other fields inside the input).
+- **Use `panels`** for showing/hiding sections of the form based on field values without breaking field registration.
+- **Use `formRef`** when submit, reset, or validate controls live outside the form (dialogs, toolbars, multi-step wizards).
+- **Wrap in `"use client"`** — `AutoForm` uses react-hook-form hooks internally and must run on the client.
+- **Validation errors** are displayed automatically per-field via the `FieldError` component. No manual wiring needed.

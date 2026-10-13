@@ -1,0 +1,534 @@
+---
+title: Data Table
+description: A typed data table with sorting, pagination, row selection, column visibility and persisted column resizing.
+---
+
+## Overview
+
+`DataTable` is a single-file table component built on [TanStack Table v9](https://tanstack.com/table) and shadcn/ui primitives. It gives you:
+
+- **Sorting** — click a header to cycle none → asc → desc; Shift-click to multi-sort.
+- **Pagination** — client-side by default, or fully server-driven via the `server` prop.
+- **Row selection** — a built-in checkbox column with controlled selection state.
+- **Column visibility** — a "View" menu in the toolbar to show/hide columns.
+- **Column resizing** — drag or use the arrow keys; widths persist to `localStorage` per `tableId`.
+- **Toolbar** — debounced search box, filter slot and action slot.
+- **Loading & empty states** — skeleton rows and an empty placeholder.
+- **i18n** — every string the table renders can be overridden with `messages`.
+
+Columns are authored with `defineColumns`, which fixes the row type once and infers each accessor's value type.
+
+## Installation
+
+```npm
+npm install @tanstack/react-table@^9 zustand lucide-react
+```
+
+Then add the component via the registry:
+
+```bash
+npx shadcn add {{url}}/r/table-form.json
+```
+
+<Callout type="info" title="shadcn/ui Primitives">
+  `DataTable` also requires the `table`, `button`, `checkbox`, `dropdown-menu`, `empty`, `input-group`, `select` and `skeleton` shadcn/ui primitives.
+</Callout>
+
+---
+
+## Basic Usage
+
+Define columns with `defineColumns`, pass `data`, and you're done. Use `DataTableColumnHeader` as the `header` to make a column sortable; its title defaults to `meta.label`.
+
+```tsx example="true"
+"use client"
+
+import { DataTable, DataTableColumnHeader, defineColumns } from "@/components/data-table"
+
+type User = { id: number; name: string; email: string; age: number }
+
+const data: User[] = [
+  { id: 1, name: "Alice",   email: "alice@example.com",   age: 32 },
+  { id: 2, name: "Bob",     email: "bob@example.com",     age: 27 },
+  { id: 3, name: "Charlie", email: "charlie@example.com", age: 45 },
+]
+
+const columns = defineColumns<User>((col) => [
+  col.accessor("name",  { header: DataTableColumnHeader, meta: { label: "Name" } }),
+  col.accessor("email", { header: DataTableColumnHeader, meta: { label: "Email" } }),
+  col.accessor("age",   { header: DataTableColumnHeader, meta: { label: "Age", className: "text-right" } }),
+])
+
+export default function BasicTable() {
+  return <DataTable columns={columns} data={data} pageSize={false} />
+}
+```
+
+<Callout type="info" title="Define columns at module scope">
+  Declare `columns` outside the component (or memoise them) so TanStack Table doesn't rebuild the column model on every render.
+</Callout>
+
+---
+
+## Columns
+
+### `defineColumns`
+
+`defineColumns<T>(build)` hands you a column helper typed for `T`. Besides TanStack's `accessor`, `display` and `group`, it adds two built-in columns:
+
+| Helper | Description |
+|---|---|
+| `col.accessor(key, def)` | Column bound to a (deep) key of `T`; the cell value type is inferred. |
+| `col.accessor(fn, def)` | Column bound to a computed value. Requires an `id`. |
+| `col.display(def)` | Column without a value (buttons, badges, etc.). |
+| `col.select()` | Leading checkbox column. Pair with `rowSelection` / `onRowSelectionChange`. |
+| `col.actions(Component)` | Trailing per-row actions column. `Component` receives `{ row: T }`. |
+
+### Column `meta`
+
+| Key | Type | Description |
+|---|---|---|
+| `label` | `string` | Header text, and the column's name in the "View" menu. Defaults to the column id. |
+| `className` | `string` | Classes applied to both the header and the cells, e.g. `"text-right"`. |
+
+`meta` is typed only for these tables — a typo such as `meta: { lable: "Name" }` is a compile error.
+
+### Custom Cells
+
+Use `cell` to render anything. The `getValue()` result is typed from the accessor.
+
+```tsx example="true"
+"use client"
+
+import { DataTable, DataTableColumnHeader, defineColumns } from "@/components/data-table"
+import { Badge } from "@/components/ui/badge"
+
+type Task = { id: string; title: string; status: "todo" | "in-progress" | "done"; due: Date }
+
+const data: Task[] = [
+  { id: "1", title: "Design mockups",   status: "done",        due: new Date("2026-09-01") },
+  { id: "2", title: "Implement API",    status: "in-progress", due: new Date("2026-10-20") },
+  { id: "3", title: "Write unit tests", status: "todo",        due: new Date("2026-11-05") },
+]
+
+const columns = defineColumns<Task>((col) => [
+  col.accessor("title", { header: DataTableColumnHeader, meta: { label: "Title" } }),
+  col.accessor("status", {
+    header: DataTableColumnHeader,
+    cell: ({ getValue }) => <Badge variant="outline">{getValue()}</Badge>,
+    meta: { label: "Status" },
+  }),
+  col.accessor("due", {
+    header: DataTableColumnHeader,
+    sortFn: "datetime",
+    cell: ({ getValue }) => getValue().toLocaleDateString(),
+    meta: { label: "Due date" },
+  }),
+])
+
+export default function TaskTable() {
+  return <DataTable columns={columns} data={data} pageSize={false} />
+}
+```
+
+The built-in sort functions are `alphanumeric`, `basic`, `datetime` and `text`.
+
+---
+
+## Row Selection & Actions
+
+Add `col.select()` for a checkbox column and `col.actions(Component)` for per-row actions. Selection is controlled: pass `rowSelection`, `onRowSelectionChange` and `getRowId`. Use `canSelectRow` to disable selection for some rows.
+
+```tsx example="true"
+"use client"
+
+import { Pencil, Trash2 } from "lucide-react"
+import { DataTable, DataTableColumnHeader, defineColumns } from "@/components/data-table"
+import { Button } from "@/components/ui/button"
+
+type User = { id: number; name: string; role: "admin" | "editor" | "viewer" }
+
+const data: User[] = [
+  { id: 1, name: "Alice",   role: "admin" },
+  { id: 2, name: "Bob",     role: "editor" },
+  { id: 3, name: "Charlie", role: "viewer" },
+]
+
+// Rendered as a component, so it may use hooks. Keep it at module scope.
+function UserActions({ row }: { row: User }) {
+  return (
+    <>
+      <Button variant="ghost" size="icon-sm" aria-label="Edit" onClick={() => console.log("Edit", row)}>
+        <Pencil />
+      </Button>
+      <Button variant="ghost" size="icon-sm" aria-label="Delete" className="text-destructive" onClick={() => console.log("Delete", row)}>
+        <Trash2 />
+      </Button>
+    </>
+  )
+}
+
+const columns = defineColumns<User>((col) => [
+  col.select(),
+  col.accessor("name", { header: DataTableColumnHeader, meta: { label: "Name" } }),
+  col.accessor("role", { header: DataTableColumnHeader, meta: { label: "Role" } }),
+  col.actions(UserActions),
+])
+
+export default function SelectableTable() {
+  const [rowSelection, setRowSelection] = React.useState<Record<string, boolean>>({})
+  const selected = Object.keys(rowSelection).length
+
+  return (
+    <div className="flex flex-col gap-2">
+      <DataTable
+        columns={columns}
+        data={data}
+        pageSize={false}
+        getRowId={(row) => String(row.id)}
+        rowSelection={rowSelection}
+        onRowSelectionChange={setRowSelection}
+        canSelectRow={(row) => row.role !== "admin"}
+      />
+      <p className="text-sm text-muted-foreground">{selected} row(s) selected</p>
+    </div>
+  )
+}
+```
+
+The header checkbox selects or clears every selectable row **on the current page**.
+
+---
+
+## Toolbar
+
+Pass an object to `toolbar` to render the built-in toolbar: a search box (when `onSearchChange` is set), a `filters` slot, the "View" column menu and an `actions` slot.
+
+The search box is debounced (300 ms). It does not filter rows itself — you filter `data` (or query your server) with the value it reports.
+
+```tsx example="true"
+"use client"
+
+import { Download } from "lucide-react"
+import { DataTable, DataTableColumnHeader, defineColumns } from "@/components/data-table"
+import { Button } from "@/components/ui/button"
+
+type Log = { id: number; message: string; level: "info" | "warn" | "error" }
+
+const LOGS: Log[] = [
+  { id: 1, message: "Server started",        level: "info" },
+  { id: 2, message: "High memory usage",     level: "warn" },
+  { id: 3, message: "Database unreachable",  level: "error" },
+  { id: 4, message: "Cache warmed",          level: "info" },
+]
+
+const columns = defineColumns<Log>((col) => [
+  col.accessor("message", { header: DataTableColumnHeader, meta: { label: "Message" } }),
+  col.accessor("level",   { header: DataTableColumnHeader, meta: { label: "Level" } }),
+])
+
+export default function LogTable() {
+  const [search, setSearch] = React.useState("")
+  const [errorsOnly, setErrorsOnly] = React.useState(false)
+
+  const data = React.useMemo(
+    () =>
+      LOGS.filter(
+        (log) =>
+          log.message.toLowerCase().includes(search.toLowerCase()) &&
+          (!errorsOnly || log.level === "error"),
+      ),
+    [search, errorsOnly],
+  )
+
+  return (
+    <DataTable
+      columns={columns}
+      data={data}
+      pageSize={false}
+      toolbar={{
+        search,
+        onSearchChange: setSearch,
+        searchPlaceholder: "Search logs…",
+        filters: (
+          <Button variant={errorsOnly ? "secondary" : "outline"} size="sm" onClick={() => setErrorsOnly((v) => !v)}>
+            Errors only
+          </Button>
+        ),
+        actions: (
+          <Button size="sm">
+            <Download />
+            Export
+          </Button>
+        ),
+      }}
+    />
+  )
+}
+```
+
+### Custom Toolbar
+
+Pass a function instead to render your own toolbar. It receives the table instance; you can still reuse `DataTableToolbar` inside it.
+
+```tsx
+<DataTable
+  columns={columns}
+  data={data}
+  toolbar={(table) => (
+    <div className="flex items-center gap-2">
+      <span className="text-sm">{table.getSelectedRowModel().rows.length} selected</span>
+      <DataTableToolbar table={table} actions={<Button size="sm">New</Button>} />
+    </div>
+  )}
+/>
+```
+
+---
+
+## Pagination
+
+### Client-side
+
+Rows are paginated in the browser with a page size of `10` by default. Change it with `pageSize`, or pass `pageSize={false}` to render every row with no pagination bar. Page sizes `10`, `20`, `50` and `100` show a "Rows per page" selector.
+
+```tsx
+<DataTable columns={columns} data={data} pageSize={20} />
+```
+
+### Server-side
+
+Pass `server` to take control of paging and sorting. The table then renders `data` as-is (no client-side sorting or slicing) and reports changes through the callbacks.
+
+```tsx example="true"
+"use client"
+
+import type { PaginationState, SortingState } from "@tanstack/react-table"
+import { DataTable, DataTableColumnHeader, defineColumns } from "@/components/data-table"
+
+type Order = { id: number; customer: string; total: number }
+
+const ALL_ORDERS: Order[] = Array.from({ length: 57 }, (_, i) => ({
+  id: i + 1,
+  customer: ["Alice", "Bob", "Charlie", "Dana", "Eve"][i % 5],
+  total: Math.round(((i * 37) % 500) + 20),
+}))
+
+// Stand-in for an API call.
+function fetchOrders({ pagination, sorting }: { pagination: PaginationState; sorting: SortingState }) {
+  const [sort] = sorting
+  const rows = [...ALL_ORDERS]
+  if (sort) {
+    const key = sort.id as keyof Order
+    rows.sort((a, b) => (a[key] > b[key] ? 1 : a[key] < b[key] ? -1 : 0) * (sort.desc ? -1 : 1))
+  }
+  const start = pagination.pageIndex * pagination.pageSize
+  return { rows: rows.slice(start, start + pagination.pageSize), rowCount: ALL_ORDERS.length }
+}
+
+const columns = defineColumns<Order>((col) => [
+  col.accessor("id",       { header: DataTableColumnHeader, meta: { label: "#" } }),
+  col.accessor("customer", { header: DataTableColumnHeader, meta: { label: "Customer" } }),
+  col.accessor("total",    { header: DataTableColumnHeader, meta: { label: "Total", className: "text-right" } }),
+])
+
+export default function ServerTable() {
+  const [pagination, setPagination] = React.useState<PaginationState>({ pageIndex: 0, pageSize: 10 })
+  const [sorting, setSorting] = React.useState<SortingState>([])
+  const { rows, rowCount } = React.useMemo(() => fetchOrders({ pagination, sorting }), [pagination, sorting])
+
+  return (
+    <DataTable
+      columns={columns}
+      data={rows}
+      server={{
+        rowCount,
+        pagination,
+        onPaginationChange: setPagination,
+        sorting,
+        onSortingChange: setSorting,
+      }}
+    />
+  )
+}
+```
+
+In a real app, keep `pagination` and `sorting` in the URL or your query library and refetch when they change.
+
+---
+
+## Loading State
+
+While the first load is pending, pass `data={undefined}` with `isLoading` to show skeleton rows. Once `data` is defined, the table renders it even if `isLoading` is still `true`, so refetches don't flash the skeleton.
+
+```tsx
+const { data, isLoading } = useQuery({ queryKey: ["users"], queryFn: fetchUsers })
+
+<DataTable columns={columns} data={data} isLoading={isLoading} />
+```
+
+---
+
+## Column Visibility & Resizing
+
+- **Visibility** — every column except `select` / `actions` can be toggled from the "View" menu. Use `initialColumnVisibility` to hide some at first, or `enableHiding: false` on a column to lock it.
+- **Resizing** — drag a header's right edge, or focus it and press ←/→ (hold Shift for larger steps). Double-click a handle to reset the table to automatic widths. Disable per column with `enableResizing: false`, and set bounds with `size`, `minSize` and `maxSize`.
+- **Persistence** — give the table a stable `tableId` to save widths to `localStorage`. Without one, widths reset on reload.
+
+```tsx example="true"
+"use client"
+
+import { DataTable, DataTableColumnHeader, defineColumns } from "@/components/data-table"
+
+type Product = { sku: string; name: string; category: string; price: number; stock: number }
+
+const data: Product[] = [
+  { sku: "W-001", name: "Widget A", category: "Tools",    price: 9.99,  stock: 120 },
+  { sku: "W-002", name: "Widget B", category: "Tools",    price: 19.99, stock: 8 },
+  { sku: "G-010", name: "Gadget X", category: "Hardware", price: 49.0,  stock: 0 },
+]
+
+const columns = defineColumns<Product>((col) => [
+  col.accessor("sku",      { header: DataTableColumnHeader, enableHiding: false, meta: { label: "SKU" } }),
+  col.accessor("name",     { header: DataTableColumnHeader, meta: { label: "Name" } }),
+  col.accessor("category", { header: DataTableColumnHeader, meta: { label: "Category" } }),
+  col.accessor("price",    { header: DataTableColumnHeader, meta: { label: "Price", className: "text-right" } }),
+  col.accessor("stock",    { header: DataTableColumnHeader, meta: { label: "Stock", className: "text-right" } }),
+])
+
+export default function ProductTable() {
+  return (
+    <DataTable
+      tableId="docs-products"
+      columns={columns}
+      data={data}
+      pageSize={false}
+      initialColumnVisibility={{ category: false }}
+      rowClassName={(row) => (row.stock === 0 ? "text-muted-foreground" : undefined)}
+      toolbar={{}}
+    />
+  )
+}
+```
+
+To reset saved widths programmatically, use the exported store:
+
+```tsx
+import { useColumnSizingStore } from "@/components/data-table"
+
+useColumnSizingStore.getState().resetSizing("docs-products")
+```
+
+---
+
+## Messages (i18n)
+
+Override any text the table renders with `messages`. Unspecified keys fall back to the English defaults.
+
+```tsx
+<DataTable
+  columns={columns}
+  data={data}
+  messages={{
+    search: "Tìm kiếm…",
+    view: "Hiển thị",
+    rowsPerPage: "Số dòng mỗi trang",
+    page: (page, count) => `Trang ${page} / ${count}`,
+    emptyTitle: "Không có dữ liệu",
+    emptyDescription: "Chưa có bản ghi nào.",
+  }}
+/>
+```
+
+---
+
+## API Reference
+
+### `DataTable` Props
+
+| Prop | Type | Default | Description |
+|---|---|---|---|
+| `columns` | `readonly DataTableColumn<T>[]` | — | **Required.** Columns, usually from `defineColumns`. |
+| `data` | `readonly T[] \| undefined` | — | **Required.** Rows. `undefined` while the first load is pending. |
+| `isLoading` | `boolean` | `false` | Shows skeleton rows while `data` is `undefined`. |
+| `pageSize` | `number \| false` | `10` | Client-side page size; `false` disables pagination. Not allowed with `server`. |
+| `server` | `ServerPaging` | `undefined` | Server-driven paging and sorting. |
+| `getRowId` | `(row: T) => string` | row index | Row identity. **Required** when using row selection. |
+| `rowSelection` | `RowSelectionState` | `undefined` | Controlled selection, keyed by `getRowId`. |
+| `onRowSelectionChange` | `OnChangeFn<RowSelectionState>` | `undefined` | Called when the selection changes. Enables selection. |
+| `canSelectRow` | `(row: T) => boolean` | all rows | Which rows may be selected. |
+| `tableId` | `string` | `undefined` | Key under which column widths are saved to `localStorage`. |
+| `rowClassName` | `(row: T) => string \| undefined` | `undefined` | Class for each body row. |
+| `toolbar` | `DataTableToolbarProps \| (table) => ReactNode` | `undefined` | Built-in toolbar props, or a render function for a custom toolbar. |
+| `initialColumnVisibility` | `ColumnVisibilityState` | `{}` | Columns hidden initially, e.g. `{ email: false }`. |
+| `messages` | `Partial<DataTableMessages>` | English | Overrides for any rendered text. |
+| `className` | `string` | `undefined` | Class on the outer wrapper. |
+
+### `ServerPaging`
+
+| Key | Type | Description |
+|---|---|---|
+| `rowCount` | `number` | Total number of rows on the server. |
+| `pagination` | `PaginationState` | `{ pageIndex, pageSize }`. |
+| `onPaginationChange` | `OnChangeFn<PaginationState>` | Called when the page or page size changes. |
+| `sorting` | `SortingState` | `[{ id, desc }]`. |
+| `onSortingChange` | `OnChangeFn<SortingState>` | Called when sorting changes. |
+
+### `DataTableToolbarProps`
+
+| Key | Type | Description |
+|---|---|---|
+| `search` | `string` | Current search value. |
+| `onSearchChange` | `(value: string) => void` | Shows a debounced (300 ms) search box when set. |
+| `searchPlaceholder` | `string` | Placeholder for the search box (defaults to `messages.search`). |
+| `filters` | `ReactNode` | Filter controls rendered next to the search box. |
+| `actions` | `ReactNode` | Primary actions on the right, e.g. a "New …" button. |
+
+### `DataTableColumnHeader`
+
+| Prop | Type | Description |
+|---|---|---|
+| `column` | `Column` | Provided by TanStack when passed as `header: DataTableColumnHeader`. |
+| `title` | `string` | Header text. Defaults to `meta.label`, then the column id. |
+| `className` | `string` | Class on the header button. |
+
+Non-sortable columns (`enableSorting: false`) render plain text.
+
+### `DataTableMessages`
+
+| Key | Default |
+|---|---|
+| `search` | `"Search…"` |
+| `clearSearch` | `"Clear search"` |
+| `view` | `"View"` |
+| `toggleColumns` | `"Toggle columns"` |
+| `rowsPerPage` | `"Rows per page"` |
+| `page` | `` (page, count) => `Page ${page} of ${count}` `` |
+| `firstPage` / `previousPage` / `nextPage` / `lastPage` | `"First page"` / `"Previous page"` / `"Next page"` / `"Last page"` |
+| `sortBy` | `` (title) => `Sort by ${title}` `` |
+| `resizeColumn` | `` (title) => `Resize ${title} column` `` |
+| `actions` | `"Actions"` |
+| `selectAll` / `selectRow` | `"Select all"` / `"Select row"` |
+| `emptyTitle` | `"No results"` |
+| `emptyDescription` | `"There is nothing to show here yet."` |
+
+### Exports
+
+| Export | Description |
+|---|---|
+| `DataTable` | The table component. |
+| `DataTableToolbar` | The built-in toolbar, for use inside a custom `toolbar` render function. |
+| `DataTableColumnHeader` | Sortable header. |
+| `defineColumns` | Typed column builder. |
+| `useColumnSizingStore` | Zustand store holding persisted column widths (`setSizing`, `resetSizing`). |
+| `DataTableColumn<T>`, `DataTableInstance<T>`, `DataTableColumnMeta`, `DataTableFeatures`, `DataTableProps<T>`, `DataTableMessages`, `ServerPaging` | Types. |
+
+---
+
+## Tips & Best Practices
+
+- **Define columns and action components at module scope** so their identity is stable across renders.
+- **Always pass `getRowId`** when rows can be reordered, filtered or refetched, so selection follows the right rows.
+- **Use `server`** for large datasets; the table then skips client-side sorting and slicing.
+- **Give each table a unique `tableId`** if you want users' column widths to survive reloads.
+- **Filter in your own code** — the toolbar only reports the search value; apply it to `data` or your API query.
