@@ -1,0 +1,691 @@
+---
+title: CC Core
+description: A command-line framework with decorators, modules, dependency injection and built-in services for commander.js.
+---
+
+<div className="flex flex-wrap items-center gap-2 not-prose mb-6">
+  <a href="https://www.npmjs.com/package/cc-core" target="_blank" rel="noreferrer">
+    <img src="https://img.shields.io/npm/v/cc-core.svg" alt="npm version" />
+  </a>
+  <a href="https://www.npmjs.com/package/cc-core" target="_blank" rel="noreferrer">
+    <img src="https://img.shields.io/npm/dm/cc-core.svg" alt="npm downloads" />
+  </a>
+  <a href="https://github.com/cuongboi/cc-core" target="_blank" rel="noreferrer">
+    <img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT" />
+  </a>
+</div>
+
+<Cards>
+  <Card
+    title="npm Package"
+    href="https://www.npmjs.com/package/cc-core"
+    description="Inspect releases, install dependencies, and view package metadata."
+  />
+  <Card
+    title="GitHub Repository"
+    href="https://github.com/cuongboi/cc-core"
+    description="Browse the source code, check issues, and view release tags."
+  />
+</Cards>
+
+---
+
+## Overview
+
+`cc-core` brings the structure and modularity of NestJS to [commander.js](https://github.com/tj/commander.js) CLIs. It enables you to declare commands as decorated classes, inject shared singletons or factories via a hierarchical dependency injection container, and wire your entire application together with a single bootstrap call.
+
+```ts title="src/commands/greet.command.ts"
+import { Argument, BaseCommand, Injectable } from "cc-core";
+import { GreetService } from "../services/greet.service";
+
+@Injectable()
+export class GreetCommand extends BaseCommand {
+  name = "greet";
+  arguments = [new Argument("<name>")];
+
+  constructor(private greeter: GreetService) {
+    super();
+  }
+
+  exec(name: string) {
+    console.log(this.greeter.greet(name));
+  }
+}
+```
+
+### Highlights
+
+- **Decorator-based DI**: `@Module`, `@Injectable`, and `@Inject` with constructor and property injection.
+- **Module Encapsulation**: Isolated dependency scopes with explicit `imports` and `exports`.
+- **Flexible Providers**: Support for `useClass`, `useValue`, `useFactory`, and multi-providers.
+- **Clear Diagnostic Errors**: Complete resolution trace paths for missing providers, dependency cycles, and missing metadata.
+- **Async-aware Bootstrap**: `loadCommand` awaits async command handlers and propagates unhandled rejections cleanly.
+- **Built-in Services**: Pluggable key-value `StorageService` (`local`, `s3`, `memory`), background scheduling (`@Cron`, `@Interval`, `@Timeout`), structured contextual `Logger`, `SpinnerService` ([ora](https://github.com/sindresorhus/ora)), and `ProgressService` ([cli-progress](https://github.com/npkgjs/cli-progress)).
+- **Unified Imports**: Directly re-exports all `commander` primitives (`Command`, `Option`, `Argument`), eliminating redundant dependencies.
+
+---
+
+## Installation
+
+```npm
+npm install cc-core
+```
+
+`commander`, `reflect-metadata`, `pino`, `pino-pretty`, `ora`, and `cli-progress` are bundled dependencies. `reflect-metadata` is loaded automatically.
+
+### Requirements
+
+- **Node.js ≥ 22.12** (required by commander 15)
+- **ESM only**: the package is published as an ES module
+
+### TypeScript Configuration
+
+Enable legacy experimental decorators and decorator metadata in your `tsconfig.json`:
+
+```json title="tsconfig.json"
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true
+  }
+}
+```
+
+<Callout type="warn" title="Decorator Metadata Compatibility">
+  Injection by parameter type relies on the `design:paramtypes` metadata emitted by `tsc`, SWC, and Bun.
+
+  **esbuild and tsx do not emit decorator metadata.** When using those runtimes, annotate parameters with `@Inject(Token)` explicitly, or the container will throw an error specifying which parameter could not be resolved.
+</Callout>
+
+---
+
+## Quick Start
+
+A minimal, end-to-end CLI application:
+
+```ts title="src/main.ts"
+import { Argument, BaseCommand, Injectable, Module, Option, loadCommand } from "cc-core";
+
+@Injectable()
+class GreetService {
+  greet(name: string) {
+    return `Hello, ${name}!`;
+  }
+}
+
+@Injectable()
+class GreetCommand extends BaseCommand {
+  name = "greet";
+  description = "Greet someone";
+  arguments = [new Argument("<name>", "who to greet")];
+  options = [new Option("-u, --upper", "shout it")];
+
+  constructor(private greeter: GreetService) {
+    super();
+  }
+
+  exec(name: string, opts: { upper?: boolean }) {
+    const message = this.greeter.greet(name);
+    console.log(opts.upper ? message.toUpperCase() : message);
+  }
+}
+
+@Module({
+  providers: [GreetService],
+  commands: [GreetCommand],
+})
+class AppModule {}
+
+await loadCommand(AppModule, {
+  name: "my-cli",
+  description: "My awesome CLI",
+  version: "1.0.0",
+});
+```
+
+Run the compiled command:
+
+```bash title="Terminal"
+$ npx tsc && node dist/main.js greet World --upper
+HELLO, WORLD!
+```
+
+<Callout type="info">
+  Commands require `@Injectable()` (or `@Inject()` on each parameter) to receive dependencies, as un-decorated classes do not emit constructor type metadata.
+</Callout>
+
+---
+
+## Modules
+
+`@Module()` defines the boundaries of your application. Providers are private to their module by default unless explicitly exported in `exports` and imported by another module via `imports`.
+
+### Configuration Options
+
+| Option | Type | Description |
+| :--- | :--- | :--- |
+| `providers` | `Provider[]` | Services owned and instantiated within this module |
+| `commands` | `Type<BaseCommand>[]` | CLI commands registered to the Commander program |
+| `imports` | `Type[]` | Modules whose exported providers become available here |
+| `exports` | `InjectionToken[]` | Tokens of providers in this module exposed to importers |
+
+### Module Example
+
+```ts title="src/modules/user.module.ts"
+import { Module } from "cc-core";
+import { DatabaseService } from "./database.service";
+import { UserService } from "./user.service";
+import { UserCommand } from "./user.command";
+
+@Module({
+  providers: [DatabaseService, UserService],
+  commands: [UserCommand],
+  exports: [UserService], // DatabaseService remains private to UserModule
+})
+export class UserModule {}
+```
+
+```ts title="src/modules/admin.module.ts"
+import { Module } from "cc-core";
+import { UserModule } from "./user.module";
+import { AdminCommand } from "./admin.command";
+
+@Module({
+  imports: [UserModule], // UserService can now be injected into AdminCommand
+  commands: [AdminCommand],
+})
+export class AdminModule {}
+```
+
+- **Singleton Lifecycle**: Providers are created lazily upon first resolution and cached—one instance per module. Modules importing an exported provider share the exporting module's singleton instance.
+- **Global Command Registration**: Commands across all modules reachable from the root are registered once, resolved against the declaring module's context.
+
+---
+
+## Dependency Injection & Providers
+
+An injection token can be a class constructor, a `string`, or a `symbol`.
+
+```ts title="src/app.module.ts"
+import { Module } from "cc-core";
+import { Logger, Cache, MemoryCache, HttpClient } from "./services";
+
+const API_URL = Symbol("API_URL");
+
+@Module({
+  providers: [
+    // 1. Class shorthand (equivalent to { provide: Logger, useClass: Logger })
+    Logger,
+
+    // 2. Class provider swapping an interface/abstract implementation
+    { provide: Cache, useClass: MemoryCache },
+
+    // 3. Constant value provider
+    { provide: API_URL, useValue: "https://api.example.com" },
+
+    // 4. Factory provider with injected dependencies
+    {
+      provide: HttpClient,
+      useFactory: (url: string, logger: Logger) => new HttpClient(url, logger),
+      inject: [API_URL, Logger],
+    },
+  ],
+})
+export class AppModule {}
+```
+
+### Multi-providers
+
+Registering the same token multiple times or specifying `multi: true` causes the token to resolve to an **array** of all registered providers in registration order.
+
+```ts title="src/plugins/plugin.module.ts"
+import { Inject, Injectable, Module } from "cc-core";
+
+const PLUGINS = Symbol("PLUGINS");
+
+@Module({
+  providers: [
+    { provide: PLUGINS, useClass: GitPlugin, multi: true },
+    { provide: PLUGINS, useClass: DockerPlugin, multi: true },
+  ],
+})
+export class PluginModule {}
+
+@Injectable()
+export class PluginRunner {
+  constructor(@Inject(PLUGINS) private plugins: Plugin[]) {}
+
+  runAll() {
+    for (const plugin of this.plugins) {
+      plugin.execute();
+    }
+  }
+}
+```
+
+### `@Inject(token)`
+
+Use `@Inject()` when a parameter type cannot be deduced by TypeScript metadata (interfaces, primitive types, strings, symbols, or runtimes lacking metadata emission):
+
+```ts title="src/services/api-client.service.ts"
+import { Inject, Injectable } from "cc-core";
+import { Logger } from "cc-core";
+
+const CONFIG = Symbol("CONFIG");
+
+interface Config {
+  apiUrl: string;
+}
+
+@Injectable()
+export class ApiClient {
+  // Property injection
+  @Inject(Logger)
+  private logger!: Logger;
+
+  // Constructor injection
+  constructor(@Inject(CONFIG) private config: Config) {}
+}
+```
+
+<Callout type="info">
+  Subclasses that do not define their own constructor inherit the parent class constructor injections. Property injections are inherited through the complete prototype chain.
+</Callout>
+
+---
+
+## Commands
+
+Commands extend `BaseCommand` and define their options and arguments declaratively:
+
+### `BaseCommand` API
+
+| Member | Required | Description |
+| :--- | :---: | :--- |
+| `name` | Yes | Name of the subcommand |
+| `description` | No | Help text displayed in `--help` |
+| `arguments` | No | Array of positional `Argument` instances |
+| `options` | No | Array of `Option` instances |
+| `exec(...args)` | Yes | Handler function receiving positional arguments, the options object, and the Commander `Command` instance. Can be `async`. |
+| `configure(cmd)` | No | Lifecycle hook to access Commander's native `Command` object for aliases, custom help text, or middleware hooks. |
+
+### Concrete Command Example
+
+```ts title="src/commands/deploy.command.ts"
+import { Argument, BaseCommand, Command, Injectable, Option } from "cc-core";
+import { DeployerService } from "../services/deployer.service";
+
+@Injectable()
+export class DeployCommand extends BaseCommand {
+  name = "deploy";
+  description = "Deploy the application to a target environment";
+  arguments = [new Argument("<env>").choices(["staging", "production"])];
+  options = [new Option("--dry-run", "simulate deployment without applying changes")];
+
+  constructor(private deployer: DeployerService) {
+    super();
+  }
+
+  protected override configure(command: Command) {
+    command.alias("d").addHelpText("after", "\nExample: my-cli deploy staging --dry-run");
+  }
+
+  async exec(env: "staging" | "production", opts: { dryRun?: boolean }) {
+    await this.deployer.run(env, opts);
+  }
+}
+```
+
+---
+
+## Bootstrapping
+
+### `loadCommand(rootModule, options, argv?)`
+
+Parses command-line arguments (defaults to `process.argv`), resolves dependencies, and executes the matched command. It returns a `Promise` that rejects if an async command throws:
+
+```ts
+import { loadCommand } from "cc-core";
+import { AppModule } from "./app.module";
+
+await loadCommand(AppModule, {
+  name: "my-cli",
+  description: "Enterprise CLI utility",
+  version: "1.0.0",
+});
+```
+
+### `createProgram(rootModule, options)`
+
+Constructs and returns the configured `commander.Command` instance without parsing arguments. Ideal for testing or custom argument parsing pipelines:
+
+```ts
+import { createProgram } from "cc-core";
+import { AppModule } from "./app.module";
+
+const program = createProgram(AppModule, { name: "my-cli" }).exitOverride();
+await program.parseAsync(["deploy", "staging"], { from: "user" });
+```
+
+### Direct Container Resolution
+
+Access the dependency injection container directly to resolve services programmatically:
+
+```ts
+import { DependencyContainer } from "cc-core";
+import { AppModule } from "./app.module";
+import { ApiClient } from "./services/api-client.service";
+
+const node = new DependencyContainer().getOrCreateModuleNode(AppModule);
+const client = node.resolve(ApiClient);
+```
+
+---
+
+## Diagnostics & Errors
+
+All DI exceptions inherit from `ResolutionError` for unified error handling:
+
+| Error | Cause |
+| :--- | :--- |
+| `ProviderNotFoundError` | A token is not registered in the current module nor exported by any imported module. The message details the full resolution trace. |
+| `CircularDependencyError` | Two or more providers depend on each other cyclically. `error.path` lists the dependency chain. |
+| `InvalidProviderError` | A `providers` entry is neither a class nor a valid `{ provide, use* }` object. |
+| `ResolutionError` | General DI failure: missing type metadata, parameter typed as an un-annotated interface, or invalid import. |
+
+Example trace:
+
+```text
+ProviderNotFoundError: Provider not found: GreetService in module AppModule
+(while resolving GreetCommand). Register it in "providers", or import a module that exports it.
+```
+
+---
+
+## Built-in Services
+
+`cc-core` provides a suite of pre-built, production-grade CLI services.
+
+### `StorageService<K, V>`
+
+An asynchronous key-value persistence engine with support for multiple swappable backends.
+
+```ts title="src/services/session.service.ts"
+import { StorageService } from "cc-core";
+
+type Session = { token: string; expires: number };
+
+const store = new StorageService<string, Session>({
+  driver: "local",
+  namespace: "my-cli",
+});
+
+await store.set("session", { token: "abc", expires: Date.now() + 3600_000 });
+const session = await store.get("session");
+const exists = await store.has("session");
+await store.delete("session");
+
+// Async iteration
+for await (const [key, value] of store) {
+  console.log(key, value);
+}
+```
+
+#### Driver Options
+
+| Driver | Configuration | Storage Target |
+| :--- | :--- | :--- |
+| `local` | `dir?` (default `./.storage`) | `<dir>/<namespace>/<key>.json` with atomic rename writes |
+| `s3` | `bucket`, `prefix?`, `client?`, or `S3ClientConfig` | `s3://<bucket>/<prefix>/<namespace>/<key>.json` |
+| `memory` | None | In-memory store (ideal for unit testing) |
+
+Every configuration accepts an optional `namespace` (defaults to `"default"`).
+
+```ts title="S3 Configuration"
+const s3Store = new StorageService({
+  driver: "s3",
+  namespace: "my-cli",
+  bucket: "my-bucket",
+  prefix: "app-state",
+  region: "us-east-1",
+});
+```
+
+<Callout type="info">
+  The `s3` driver dynamically imports `@aws-sdk/client-s3` only when instantiated, so CLIs using local or memory drivers do not incur AWS SDK load overhead.
+</Callout>
+
+#### Custom Storage Adapters
+
+Implement `StorageAdapter` to connect to custom backends such as Redis:
+
+```ts title="src/adapters/redis.adapter.ts"
+import { StorageAdapter, registerStorageDriver, StorageService } from "cc-core";
+import Redis from "ioredis";
+
+class RedisAdapter implements StorageAdapter {
+  constructor(private redis: Redis, private ns: string) {}
+  get = (key: string) => this.redis.get(`${this.ns}:${key}`).then((v) => v ?? undefined);
+  set = async (key: string, value: string) => void (await this.redis.set(`${this.ns}:${key}`, value));
+  delete = async (key: string) => (await this.redis.del(`${this.ns}:${key}`)) > 0;
+  async *keys() { /* SCAN keys matching `${this.ns}:*` */ }
+}
+
+declare module "cc-core" {
+  interface StorageDrivers {
+    redis: { url: string };
+  }
+}
+
+registerStorageDriver("redis", ({ url }, namespace) => new RedisAdapter(new Redis(url), namespace));
+const redisStore = new StorageService({ driver: "redis", url: "redis://localhost", namespace: "my-cli" });
+```
+
+---
+
+### Task Scheduling
+
+Import `ScheduleModule`, decorate methods on any provider, and let an orchestrator manage execution:
+
+```ts title="src/tasks/report.tasks.ts"
+import {
+  BaseCommand,
+  Cron,
+  CronExpression,
+  Inject,
+  Injectable,
+  Interval,
+  Module,
+  ScheduleModule,
+  ScheduleOrchestrator,
+  Timeout,
+} from "cc-core";
+
+@Injectable()
+export class ReportTasks {
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT, { timeZone: "UTC" })
+  nightly() {
+    console.log("Running nightly report...");
+  }
+
+  @Interval("poll", 10_000)
+  poll() {
+    console.log("Polling external status...");
+  }
+
+  @Timeout(5_000)
+  warmup() {
+    console.log("Warmed up!");
+  }
+}
+
+class WorkerCommand extends BaseCommand {
+  name = "worker";
+
+  constructor(@Inject(ScheduleOrchestrator) private scheduler: ScheduleOrchestrator) {
+    super();
+  }
+
+  exec() {
+    return this.scheduler.run();
+  }
+}
+
+@Module({
+  imports: [ScheduleModule],
+  providers: [ReportTasks],
+  commands: [WorkerCommand],
+})
+export class AppModule {}
+```
+
+- **Graceful Shutdown**: `scheduler.run()` halts on `SIGINT` or `SIGTERM`, waits for running jobs to finish, and exits cleanly. A second Ctrl+C forces immediate termination.
+- **Overlap Prevention**: Consecutive executions of the same job are skipped if a prior run is still in progress unless `allowOverlap: true` is configured.
+- **Dynamic Job Control**: Inject `SchedulerRegistry` to dynamically register, inspect, trigger, or stop jobs at runtime.
+
+---
+
+### Structured Logger
+
+A context-aware wrapper around [pino](https://getpino.io) with human-readable formatting via [pino-pretty](https://github.com/pinojs/pino-pretty):
+
+```ts title="src/services/deploy.service.ts"
+import { Injectable, Logger } from "cc-core";
+
+@Injectable()
+export class DeployService {
+  private readonly logger = new Logger(DeployService.name);
+
+  async deploy(files: string[]) {
+    this.logger.info("Uploading %d files", files.length);
+    this.logger.debug({ files }, "file manifest");
+
+    try {
+      await this.uploadFiles(files);
+    } catch (error) {
+      this.logger.error(error, "Upload failed");
+    }
+  }
+
+  private async uploadFiles(files: string[]) {
+    // upload logic
+  }
+}
+```
+
+- **Synchronous Stderr Writes**: Logs are written directly to `stderr` in-process, preventing log drop on `process.exit()`.
+- **Formatting Options**: Supports `"pretty"` (default) for terminal readability and `"json"` (NDJSON) for log aggregators.
+- **Global Runtime Configuration**: Call `Logger.configure({ level, format })` during Commander preAction hooks to adapt to `--verbose` or `--json` flags on the fly.
+
+```ts title="Dynamic Logger Hook"
+import { Logger, LOG_LEVELS, Option, createProgram } from "cc-core";
+import { AppModule } from "./app.module";
+
+const program = createProgram(AppModule, { name: "my-cli" })
+  .option("-v, --verbose", "show debug logs")
+  .addOption(new Option("--log-level <level>").choices(["silent", ...LOG_LEVELS]))
+  .option("--json", "output logs in NDJSON format")
+  .hook("preAction", (cmd) => {
+    const { verbose, logLevel, json } = cmd.opts();
+    Logger.configure({
+      level: logLevel ?? (verbose ? "debug" : undefined),
+      format: json ? "json" : "pretty",
+    });
+  });
+
+await program.parseAsync();
+```
+
+---
+
+### Terminal UI: Spinners & Progress Bars
+
+Injectable utilities for command-line visual indicators.
+
+#### `SpinnerService`
+
+Wrapper around [ora](https://github.com/sindresorhus/ora) for status spinners:
+
+```ts
+import { Injectable } from "cc-core";
+import { SpinnerService } from "cc-core";
+
+@Injectable()
+export class SyncService {
+  constructor(private spinner: SpinnerService) {}
+
+  async sync() {
+    this.spinner.start("Syncing database...");
+    await performSync();
+    this.spinner.succeed("Sync complete!");
+  }
+}
+```
+
+| Method | Description |
+| :--- | :--- |
+| `start(text, opts?)` | Starts the spinner with optional Ora configuration |
+| `succeed(text?)` | Stops the spinner and renders ✔ |
+| `fail(text?)` | Stops the spinner and renders ✖ |
+| `warn(text?)` | Stops the spinner and renders ⚠ |
+| `info(text?)` | Stops the spinner and renders ℹ |
+| `stop()` | Stops the spinner without a prefix glyph |
+| `setText(text)` | Updates the active label text dynamically |
+
+#### `ProgressService`
+
+Wrapper around [cli-progress](https://github.com/npkgjs/cli-progress) for single or multiple progress bars:
+
+```ts
+import { Injectable } from "cc-core";
+import { ProgressService } from "cc-core";
+
+@Injectable()
+export class BatchUploadService {
+  constructor(private progress: ProgressService) {}
+
+  async upload(items: string[]) {
+    this.progress.start(items.length);
+
+    for (const item of items) {
+      await uploadItem(item);
+      this.progress.increment();
+    }
+
+    this.progress.stop();
+  }
+}
+```
+
+Multi-bar support is available via `progress.startMulti()` and `progress.addBar(total, startValue, payload)`.
+
+---
+
+## Utilities
+
+Lightweight async helper utilities included out of the box:
+
+```ts
+import { wait, debounce, throttle } from "cc-core";
+
+// Pause execution for 1,000 milliseconds
+await wait(1000);
+
+// Debounce an operation (executes 300ms after last invocation)
+const persist = debounce((doc) => save(doc), 300);
+
+// Throttle an operation (executes at most once every 500ms)
+const log = throttle((msg: string) => console.log(msg), 500);
+```
+
+---
+
+## Migration from 0.1.x
+
+- **Async Command Runner**: `loadCommand` returns a `Promise` and uses `parseAsync`. Ensure you `await loadCommand(...)`.
+- **Strict Injection**: Commands declaring constructor dependencies must be decorated with `@Injectable()`. Undecorated commands with dependencies now throw a clear `ResolutionError`.
+- **Async Storage API**: `StorageService` methods (`get`, `set`, `has`, `delete`, `size`) are async and return promises. The constructor accepts a configuration object `{ driver, namespace, dir }`.
+- **Atomic File Writes**: `LocalStorageAdapter` writes to temporary files before atomically replacing target files. Keys are percent-encoded to prevent directory traversal or delimiter collisions.

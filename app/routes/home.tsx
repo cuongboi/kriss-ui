@@ -1,4 +1,4 @@
-import { HomeLayout } from "fumadocs-ui/layouts/home";
+import { HomeLayout } from "@/layouts/home";
 import { Link } from "react-router";
 import { baseOptions } from "@/lib/layout.shared";
 

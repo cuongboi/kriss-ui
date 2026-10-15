@@ -74,7 +74,7 @@ export default function Page({ loaderData }: Route.ComponentProps) {
 		useFumadocsLoader(loaderData);
 
 	return (
-		<DocsLayout {...baseOptions()} tree={pageTree}>
+		<DocsLayout {...baseOptions()} tree={pageTree} githubUrl="">
 			{clientLoader.useContent(path, {
 				markdownUrl,
 				path,

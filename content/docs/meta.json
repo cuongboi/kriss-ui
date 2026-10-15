@@ -1,4 +1,10 @@
 {
-	"collapsible": false,
-	"pages": ["---Introduction---", "index", "---Components---", "auto-form", "table-form"]
+  "collapsible": false,
+  "pages": [
+    "---Components---",
+    "auto-form",
+    "table-form",
+    "cc-core",
+    "fiels"
+  ]
 }

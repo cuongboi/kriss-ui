@@ -1,5 +1,5 @@
 import type { Route } from './+types/not-found';
-import { HomeLayout } from 'fumadocs-ui/layouts/home';
+import { HomeLayout } from '@/layouts/home';
 import { baseOptions } from '@/lib/layout.shared';
 import { DefaultNotFound } from 'fumadocs-ui/layouts/home/not-found';
 
